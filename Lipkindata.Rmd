@@ -1,0 +1,130 @@
+---
+title: "GetLipkinData"
+author: "Dorothy Bishop"
+date: "2024-04-16"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+require(tidyverse)
+```
+
+## Where to find stuff
+Data downloaded from https://figshare.com/articles/dataset/LanA_Dataset/20425209
+
+SPM Subjects
+
+Data paper is here: https://www.nature.com/articles/s41597-022-01645-3
+
+
+The mirror analyses need Matlab. This is found on:
+dorothybishop\Applications 
+
+Type spm
+
+Select fMRI
+
+Modified version of mirror.m for Lipkin settings
+outpth =
+    '/Volumes/Extreme_Pro/_fedorenko_data/_mirrorout'
+
+Have made script that works!
+
+Need to read demographics bits
+
+```{r readdemog}
+outpth <-
+    '/Volumes/Extreme_Pro/_fedorenko_data/_mirrorout'
+rawfilepath <- 
+    "/Volumes/Extreme_Pro/_fedorenko_data/assets/language/subjects"
+    
+filelist <- list.files(rawfilepath)
+getbits <-read.table(paste0(rawfilepath,"/001/Demograhics_&_Summary.txt"))
+df <-data.frame(matrix(NA,nrow=length(filelist),ncol=nrow(getbits)))
+names(df)<-getbits[,1]
+
+for (f in 1:length(filelist)){
+  getbits <-read.table(paste0(rawfilepath,"/",filelist[f],"/Demograhics_&_Summary.txt"))
+  df[f,]<-getbits[,2]
+}
+
+write.csv(df,paste0(outpth,'/demogs.csv'),row.names=F)
+table(df$Handedness,df$Lateralization)
+```
+
+
+Lipkin2.csv was created in matlab to give mirror scores for 4 ROIs.
+We'll try to do plots of these
+
+```{r makedf}
+datapath <- '/Volumes/Extreme_Pro/_fedorenko_data/_mirrorout/'
+mydemog <- read.csv(paste0(datapath,'demogs.csv'))
+mymirror <- read.csv(paste0(datapath,'lipkin2.csv'))
+mydf<-rbind(mydemog,mydemog,mydemog,mydemog)
+mydf<-cbind(mydf,mymirror)
+mydf$Rhand <-1
+mydf$Rhand[mydf$Handedness !='right']<-0
+mydf$Rhand[mydf$Handedness =='NaN']<-NA
+mydf$siglat <- 0
+mydf$siglat[mydf$diff_CIlow>0]<- 1
+mydf$siglat[mydf$diff_CIhigh<0] <- 1
+
+table(mydf$Rhand,mydf$siglat,mydf$mask)
+
+```
+
+```{r makeplatestack}
+
+mymasks<-c("frontal"  ,  "temporal" ,  "parietal" ,  "cerebellar" )
+mycols<-c('black','red')
+for (m in 1:length(mymasks)){
+  thismask<-mymasks[m]
+  myf<-filter(mydf,mask==thismask)
+  myf<-myf[!is.na(myf$Rhand),]
+  myf <- myf[order(myf$Rhand,myf$meandiff),] #because of missing data need to set rows nonautomatically
+  t<-table(myf$Rhand) #Ns 
+  v<-as.vector(t)
+  lv <- length(v)
+  rowlist<-vector()
+  for (l in 1:lv){
+    rowlist<-c(rowlist,1:v[l])
+  }
+  myf$row<-rowlist
+
+  g<-ggplot(myf,aes(y=row,x=meandiff,col=(1+siglat)))+
+  geom_point(size=.5,color=mycols[(1+myf$siglat)])+
+  xlab("Mirror laterality index")+
+  ylab("Rank order")+
+  geom_errorbar(aes(xmin=diff_CIlow, xmax=diff_CIhigh),  width=.05,color=mycols[1+myf$siglat])+
+  geom_vline(xintercept=0, linetype="dotted")+
+    geom_vline(xintercept=mean(myf$meandiff),linetype="dashed")
+  
+g<-g+
+  facet_grid(.~Rhand)+
+    theme( axis.text = element_text( size = 12 ),
+         axis.text.x = element_text( size = 10 ),
+         axis.title = element_text( size = 12),
+         title = element_text(size=16),
+         legend.position="none",
+         # The new stuff
+         strip.text = element_text(size = 14))
+
+plotname<-paste0('Lipkin_',thismask,'.png')
+ggsave(here("plots",plotname),width=6,height=8)
+}
+```
+
+```{r meansbyhand}
+
+mya<- aggregate(mydf$meandiff,by=list(mydf$mask,mydf$Rhand),FUN=mean)
+mys<- aggregate(mydf$meandiff,by=list(mydf$mask,mydf$Rhand),FUN=sd)
+myn<- aggregate(mydf$meandiff,by=list(mydf$mask,mydf$Rhand),FUN=length)
+mya<-cbind(mya,mys[,3],myn[,3])
+dfmeans <- mya[1:4,]
+dfbit<-mya[5:8,]
+dfmeans<-cbind(dfmeans,dfbit)
+dfmeans<-dfmeans[,c(1,10,8,9,5,3,4)]
+names(dfmeans) <- c('mask','N RH','mean RH','sd RH','N nonRH','mean nonRH','sd nonRH')
+
+```
